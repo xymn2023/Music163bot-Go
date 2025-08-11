@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ===== 自动引导：不在项目目录时，自动下载并进入仓库 =====
-REPO_URL="${REPO_URL:-https://github.com/XiaoMengXinX/Music163bot-Go.git}"
+REPO_URL="${REPO_URL:-https://github.com/xymn2023/Music163bot-Go.git}"
 # 优先尝试的分支，按顺序回退
 PREFERRED_BRANCHES=(${REPO_BRANCH:-v2} main master)
 PROJECT_DIR_NAME="${PROJECT_DIR_NAME:-Music163bot-Go}"
