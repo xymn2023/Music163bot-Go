@@ -1097,7 +1097,7 @@ main_menu() {
         echo "=========================================="
         echo
         echo "请选择操作:"
-        echo "1. 环境检查与依赖安装"
+        echo "1. 环境检查与依赖安装(核心必备)"
         echo "2. 本地编译部署 (推荐)"
         echo "3. Docker 单容器部署"
         echo "4. Docker Compose 部署"
@@ -1141,9 +1141,10 @@ main_menu() {
                 ;;
             0)
                 echo
+                clear # 在退出前清屏
                 log_success "感谢使用 Music163bot-Go Linux 一键部署脚本！"
-                echo "项目地址: https://github.com/XiaoMengXinX/Music163bot-Go"
-                echo
+                echo "项目地址: https://github.com/xymn2023/Music163bot-Go"
+                echo                 "脚本作者BY:xymn2023"
                 exit 0
                 ;;
             *)
