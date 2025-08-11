@@ -73,8 +73,8 @@ bootstrap_project() {
   if [[ -f "./deploy.sh" ]]; then
     chmod +x ./deploy.sh
     echo "[信息] 切换到项目目录并继续执行 ./deploy.sh ..."
-    # 修复：使用 source 而不是 exec，保持在同一个 shell 会话中
-    source ./deploy.sh "$@"
+    # 重新执行，使用 exec 替换当前进程
+    exec bash ./deploy.sh "$@"
   else
     echo "[错误] 项目内未找到 deploy.sh，请检查仓库"
     exit 1
@@ -115,10 +115,17 @@ log_error() {
     echo -e "${RED}[错误]${NC} $1"
 }
 
-# 检查是否为root用户 - 修复版本
+# 检查是否为root用户 - 修复管道模式问题
 check_root() {
     if [[ $EUID -eq 0 ]]; then
         log_warning "检测到您正在使用root用户运行此脚本"
+        
+        # 检测是否在管道模式下运行（stdin不是终端）
+        if [[ ! -t 0 ]]; then
+            log_info "检测到管道模式运行，自动以root用户继续..."
+            return 0
+        fi
+        
         echo -n "建议创建普通用户来运行此程序，是否继续？(y/n): "
         read -r continue_root
         if [[ ! "$continue_root" =~ ^[Yy]$ ]]; then
@@ -200,7 +207,7 @@ ver_ge() {
   [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
 }
 
-# 安装Go环境
+# 安装Go环境 - 修复版本
 install_go() {
     if command -v go >/dev/null 2>&1; then
         local current_go_version
@@ -245,7 +252,16 @@ install_go() {
     local download_url="https://go.dev/dl/${go_package}"
     
     log_info "下载Go安装包: $go_package"
-    wget -O "/tmp/$go_package" "$download_url"
+    
+    # 使用多种下载方式，提高成功率
+    if command -v wget >/dev/null 2>&1; then
+        wget -O "/tmp/$go_package" "$download_url"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fL "$download_url" -o "/tmp/$go_package"
+    else
+        log_error "未找到wget或curl，无法下载Go"
+        exit 1
+    fi
     
     if [ $? -ne 0 ]; then
         log_error "Go下载失败"
@@ -256,23 +272,44 @@ install_go() {
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf "/tmp/$go_package"
     
-    # 设置环境变量
-    if ! grep -q "/usr/local/go/bin" ~/.bashrc; then
+    if [ $? -ne 0 ]; then
+        log_error "Go解压安装失败"
+        exit 1
+    fi
+    
+    # 设置环境变量到配置文件
+    local bashrc_updated=false
+    if ! grep -q "/usr/local/go/bin" ~/.bashrc 2>/dev/null; then
+        echo '' >> ~/.bashrc
+        echo '# Go environment' >> ~/.bashrc
         echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
         echo 'export GOPATH=$HOME/go' >> ~/.bashrc
         echo 'export GOBIN=$GOPATH/bin' >> ~/.bashrc
+        bashrc_updated=true
     fi
     
-    # 立即生效
+    # 立即在当前会话中生效
     export PATH=$PATH:/usr/local/go/bin
     export GOPATH=$HOME/go
     export GOBIN=$GOPATH/bin
     
+    # 创建GOPATH目录
+    mkdir -p "$GOPATH"/{bin,src,pkg}
+    
     # 清理下载文件
     rm -f "/tmp/$go_package"
     
-    log_success "Go安装完成"
-    go version
+    # 验证安装
+    if command -v go >/dev/null 2>&1; then
+        log_success "Go安装完成"
+        go version
+        if [ "$bashrc_updated" = true ]; then
+            log_info "环境变量已添加到 ~/.bashrc"
+        fi
+    else
+        log_error "Go安装验证失败"
+        exit 1
+    fi
 }
 
 # 安装Docker
@@ -386,9 +423,26 @@ EOF
     log_success "配置文件已创建: config.ini"
 }
 
-# 编译程序
+# 编译程序 - 修复版本
 compile_program() {
     log_info "开始编译程序..."
+    
+    # 确保Go环境变量生效
+    export PATH=$PATH:/usr/local/go/bin
+    export GOPATH=$HOME/go
+    export GOBIN=$GOPATH/bin
+    
+    # 验证Go是否可用
+    if ! command -v go >/dev/null 2>&1; then
+        log_error "Go命令未找到，请确认Go已正确安装"
+        log_info "尝试重新加载环境变量..."
+        source ~/.bashrc 2>/dev/null || true
+        export PATH=$PATH:/usr/local/go/bin
+        if ! command -v go >/dev/null 2>&1; then
+            log_error "Go环境配置失败，请手动检查"
+            exit 1
+        fi
+    fi
     
     if [ ! -f "build.sh" ]; then
         log_error "未找到build.sh文件"
@@ -398,16 +452,67 @@ compile_program() {
     # 确保build.sh可执行
     chmod +x build.sh
     
-    # 编译程序
-    bash build.sh
+    # 修复git describe问题 - 创建一个临时的build脚本
+    log_info "准备编译环境..."
+    
+    # 检查是否有git标签，如果没有就创建默认版本信息
+    if ! git describe --tags >/dev/null 2>&1; then
+        log_warning "未检测到git标签，使用默认版本信息"
+        # 创建修复版本的build脚本
+        cat > build_fixed.sh << 'EOF'
+#!/bin/bash
+
+# 获取提交信息，如果失败则使用默认值
+COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+
+# 获取版本信息，如果git describe失败则使用默认版本
+if git describe --tags >/dev/null 2>&1; then
+    VERSION=$(git describe --tags)
+else
+    VERSION="v2.0.0"
+fi
+
+BUILD_TIME=$(date +'%Y-%m-%d %T')
+
+LDFlags="\
+    -s -w \
+    -X 'main._VersionName=${VERSION}' \
+    -X 'main.commitSHA=${COMMIT_SHA}' \
+    -X 'main.buildTime=${BUILD_TIME}' \
+    -X 'main.repoPath=XiaoMengXinX/Music163bot-Go'\
+    -X 'main.rawRepoPath=XiaoMengXinX/Music163bot-Go/v2'\
+"
+
+echo "编译信息:"
+echo "  版本: $VERSION"
+echo "  提交: $COMMIT_SHA"
+echo "  时间: $BUILD_TIME"
+echo
+
+CGO_ENABLED=0 go build -trimpath -ldflags "${LDFlags}"
+EOF
+        chmod +x build_fixed.sh
+        log_info "使用修复版本的build脚本编译..."
+        bash build_fixed.sh
+    else
+        # 有标签的情况下使用原始build.sh
+        log_info "使用原始build脚本编译..."
+        bash build.sh
+    fi
     
     if [ $? -ne 0 ]; then
         log_error "编译失败"
+        log_info "尝试调试信息:"
+        log_info "Go版本: $(go version 2>/dev/null || echo '未找到')"
+        log_info "当前路径: $(pwd)"
+        log_info "Go模块信息:"
+        cat go.mod 2>/dev/null || echo "未找到go.mod"
         exit 1
     fi
     
     if [ ! -f "Music163bot-Go" ]; then
         log_error "编译产物未找到"
+        ls -la . | head -10
         exit 1
     fi
     
@@ -415,6 +520,7 @@ compile_program() {
     chmod +x Music163bot-Go
     
     log_success "程序编译完成"
+    log_info "编译产物: $(ls -lh Music163bot-Go)"
 }
 
 # 创建systemd服务
@@ -761,12 +867,19 @@ environment_setup() {
     read -r
 }
 
-# 本地部署
+# 本地部署 - 修复版本
 local_deploy() {
     echo "=========================================="
     echo "            本地编译部署"
     echo "=========================================="
     echo
+    
+    # 确保依赖已安装
+    log_info "检查编译环境..."
+    if ! command -v go >/dev/null 2>&1; then
+        log_warning "Go环境未找到，重新安装..."
+        install_go
+    fi
     
     # 检查配置文件
     if [ ! -f "config.ini" ]; then
