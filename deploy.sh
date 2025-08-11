@@ -73,14 +73,18 @@ bootstrap_project() {
   if [[ -f "./deploy.sh" ]]; then
     chmod +x ./deploy.sh
     echo "[信息] 切换到项目目录并继续执行 ./deploy.sh ..."
-    exec bash ./deploy.sh "$@"
+    # 修复：使用 source 而不是 exec，保持在同一个 shell 会话中
+    source ./deploy.sh "$@"
   else
     echo "[错误] 项目内未找到 deploy.sh，请检查仓库"
     exit 1
   fi
 }
 
-bootstrap_project "$@"
+# 只有在未设置 M163_BOOTSTRAP_DONE 时才执行 bootstrap
+if [[ -z "$M163_BOOTSTRAP_DONE" ]]; then
+    bootstrap_project "$@"
+fi
 # ===== 自动引导结束 =====
 
 # 设置颜色输出
@@ -111,15 +115,17 @@ log_error() {
     echo -e "${RED}[错误]${NC} $1"
 }
 
-# 检查是否为root用户
+# 检查是否为root用户 - 修复版本
 check_root() {
     if [[ $EUID -eq 0 ]]; then
         log_warning "检测到您正在使用root用户运行此脚本"
-        echo "建议创建普通用户来运行此程序，是否继续？(y/n)"
+        echo -n "建议创建普通用户来运行此程序，是否继续？(y/n): "
         read -r continue_root
         if [[ ! "$continue_root" =~ ^[Yy]$ ]]; then
+            log_info "退出安装"
             exit 1
         fi
+        log_info "继续使用root用户执行..."
     fi
 }
 
@@ -312,17 +318,23 @@ create_config() {
     echo
     
     while [[ -z "$bot_token" ]]; do
-        read -p "请输入Bot Token: " bot_token
+        echo -n "请输入Bot Token: "
+        read -r bot_token
         if [[ -z "$bot_token" ]]; then
             log_error "Bot Token不能为空！"
         fi
     done
     
-    read -p "请输入MUSIC_U (可选，用于下载无损音乐): " music_u
-    read -p "请输入Bot管理员ID (可选，多个用逗号分隔): " bot_admin
-    read -p "是否开启调试模式？(true/false，默认false): " bot_debug
-    read -p "设置日志级别 (默认info): " log_level
-    read -p "设置下载超时时间/秒 (默认60): " download_timeout
+    echo -n "请输入MUSIC_U (可选，用于下载无损音乐): "
+    read -r music_u
+    echo -n "请输入Bot管理员ID (可选，多个用逗号分隔): "
+    read -r bot_admin
+    echo -n "是否开启调试模式？(true/false，默认false): "
+    read -r bot_debug
+    echo -n "设置日志级别 (默认info): "
+    read -r log_level
+    echo -n "设置下载超时时间/秒 (默认60): "
+    read -r download_timeout
     
     # 设置默认值
     [[ -z "$bot_debug" ]] && bot_debug="false"
@@ -352,7 +364,7 @@ BotDebug = $bot_debug
 # 自定义 sqlite3 数据库文件 （默认为 cache.db）
 Database = cache.db
 
-# 设置日志等级 [panic|fatal|error|warn|info|debug|trace] (默认为info)
+# 设置日志等级 [panic|fatal|error|warn|info|debug|trace] (默认为 info)
 LogLevel = $log_level
 
 # 是否开启自动更新 (默认开启), 若设置为 false 相当于 -no-update 参数
@@ -537,8 +549,10 @@ docker_compose_deploy() {
     
     # 配置API参数
     echo "请配置Telegram Bot API参数:"
-    read -p "请输入API_ID: " api_id
-    read -p "请输入API_HASH: " api_hash
+    echo -n "请输入API_ID: "
+    read -r api_id
+    echo -n "请输入API_HASH: "
+    read -r api_hash
     
     if [[ -z "$api_id" ]] || [[ -z "$api_hash" ]]; then
         log_error "API_ID和API_HASH不能为空"
@@ -666,7 +680,8 @@ stop_services() {
     echo "6. 停止所有服务"
     echo "7. 返回主菜单"
     echo
-    read -p "请选择 (1-7): " stop_choice
+    echo -n "请选择 (1-7): "
+    read -r stop_choice
     
     case $stop_choice in
         1)
@@ -735,13 +750,15 @@ environment_setup() {
     install_go
     
     echo
-    read -p "是否要安装Docker？(y/n): " install_docker_choice
+    echo -n "是否要安装Docker？(y/n): "
+    read -r install_docker_choice
     if [[ "$install_docker_choice" =~ ^[Yy]$ ]]; then
         install_docker
     fi
     
     log_success "环境设置完成！"
-    read -p "按Enter键继续..."
+    echo -n "按Enter键继续..."
+    read -r
 }
 
 # 本地部署
@@ -766,13 +783,15 @@ local_deploy() {
     echo "2. supervisor"
     echo "3. 直接运行"
     echo
-    read -p "请选择 (1-3): " service_choice
+    echo -n "请选择 (1-3): "
+    read -r service_choice
     
     case $service_choice in
         1)
             create_systemd_service
             echo
-            read -p "是否现在启动服务？(y/n): " start_now
+            echo -n "是否现在启动服务？(y/n): "
+            read -r start_now
             if [[ "$start_now" =~ ^[Yy]$ ]]; then
                 sudo systemctl start music163bot
                 log_success "服务已启动"
@@ -782,7 +801,8 @@ local_deploy() {
         2)
             create_supervisor_config
             echo
-            read -p "是否现在启动服务？(y/n): " start_now
+            echo -n "是否现在启动服务？(y/n): "
+            read -r start_now
             if [[ "$start_now" =~ ^[Yy]$ ]]; then
                 sudo supervisorctl start music163bot
                 log_success "服务已启动"
@@ -801,7 +821,8 @@ local_deploy() {
             ;;
     esac
     
-    read -p "按Enter键继续..."
+    echo -n "按Enter键继续..."
+    read -r
 }
 
 # 配置管理
@@ -818,7 +839,8 @@ config_management() {
         echo "5. 还原配置文件"
         echo "6. 返回主菜单"
         echo
-        read -p "请选择操作 (1-6): " config_choice
+        echo -n "请选择操作 (1-6): "
+        read -r config_choice
         
         case $config_choice in
             1)
@@ -856,7 +878,8 @@ config_management() {
                 if ls config.ini.backup.* 1> /dev/null 2>&1; then
                     echo "可用的备份文件:"
                     ls -1 config.ini.backup.*
-                    read -p "请输入要还原的备份文件名: " backup_file
+                    echo -n "请输入要还原的备份文件名: "
+                    read -r backup_file
                     if [ -f "$backup_file" ]; then
                         cp "$backup_file" config.ini
                         log_success "配置文件已还原"
@@ -876,7 +899,8 @@ config_management() {
         esac
         
         if [ "$config_choice" != "6" ]; then
-            read -p "按Enter键继续..."
+            echo -n "按Enter键继续..."
+            read -r
         fi
     done
 }
@@ -898,7 +922,8 @@ service_management() {
         echo "8. 查看supervisor日志"
         echo "9. 返回主菜单"
         echo
-        read -p "请选择操作 (1-9): " service_choice
+        echo -n "请选择操作 (1-9): "
+        read -r service_choice
         
         case $service_choice in
             1)
@@ -940,7 +965,8 @@ service_management() {
         esac
         
         if [[ ! "$service_choice" =~ ^[78]$ ]] && [ "$service_choice" != "9" ]; then
-            read -p "按Enter键继续..."
+            echo -n "按Enter键继续..."
+            read -r
         fi
     done
 }
@@ -968,7 +994,8 @@ main_menu() {
         echo "8. 停止服务"
         echo "0. 退出"
         echo
-        read -p "请输入选择 (0-8): " choice
+        echo -n "请输入选择 (0-8): "
+        read -r choice
         
         case $choice in
             1)
@@ -991,11 +1018,13 @@ main_menu() {
                 ;;
             7)
                 check_status
-                read -p "按Enter键继续..."
+                echo -n "按Enter键继续..."
+                read -r
                 ;;
             8)
                 stop_services
-                read -p "按Enter键继续..."
+                echo -n "按Enter键继续..."
+                read -r
                 ;;
             0)
                 echo
@@ -1018,6 +1047,7 @@ main() {
     if [ ! -f "main.go" ] || [ ! -f "go.mod" ]; then
         log_warning "未在项目根目录，尝试自动下载并切换目录..."
         bootstrap_project "$@"
+        return
     fi
     
     # 权限提醒与系统检测
