@@ -23,6 +23,19 @@
 - 下载无损flac音频 （需设置网易云VIP账号的MUSIC_U)
 - 动态更新（使用 [traefik/yaegi](https://github.com/traefik/yaegi) 作为动态扩展框架）
 
+## 推荐（步骤1+2组合）
+
+**一键安装**
+
+```
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/xymn2023/Music163bot-Go/v2/deploy.sh)"
+```
+
+## 1. 环境检查与依赖安装 这个必须安装
+
+## 2.本地编译部署 (推荐)    
+
+
 ## ⚙️ 构建
 
 构建前请确保拥有 `Go 1.17`或更高版本
@@ -116,3 +129,4 @@ $ ./Music163bot-Go
 - `/musicid` 或 `/netease` + `音乐ID`  —— 从 MusicID 获取歌曲
 - `/search` + `关键词` —— 搜索歌曲
 - `/about` —— 关于本 bot
+
